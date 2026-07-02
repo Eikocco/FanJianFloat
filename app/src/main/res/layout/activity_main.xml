@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="30dp"
+    android:background="#FF1A1A2E">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="😽"
+        android:textSize="64sp"
+        android:gravity="center" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="繁→简 悬浮窗 OCR"
+        android:textColor="#FFD700"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="看漫画小说时自动识别繁体并转简体"
+        android:textColor="#AAA"
+        android:textSize="14sp"
+        android:layout_marginTop="8dp" />
+
+    <TextView
+        android:id="@+id/tv_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="首次使用需要授予两个权限：\n① 悬浮窗权限\n② 屏幕录制权限（仅用于OCR识别）"
+        android:textColor="#888"
+        android:textSize="12sp"
+        android:gravity="center"
+        android:layout_marginTop="30dp"
+        android:lineSpacingExtra="4dp" />
+
+    <Button
+        android:id="@+id/btn_start"
+        android:layout_width="220dp"
+        android:layout_height="50dp"
+        android:text="🚀 开始使用"
+        android:textColor="#000"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:background="#FFD700"
+        android:layout_marginTop="20dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="使用方法：\n① 点击按钮授权\n② 打开漫画App\n③ 悬浮窗自动显示简体字"
+        android:textColor="#666"
+        android:textSize="11sp"
+        android:gravity="center"
+        android:layout_marginTop="30dp"
+        android:lineSpacingExtra="3dp" />
+</LinearLayout>
