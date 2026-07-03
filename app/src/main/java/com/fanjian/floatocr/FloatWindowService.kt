@@ -40,8 +40,7 @@ class FloatWindowService : Service() {
 
     private var isRunning = false
     private val handler = Handler(Looper.getMainLooper())
-    private var captureRunnable: Runnable? = null
-    private val CAPTURE_INTERVAL = 2500L // 2.5 seconds
+    private val CAPTURE_INTERVAL = 2500L
 
     private var screenWidth = 0
     private var screenHeight = 0
@@ -49,6 +48,15 @@ class FloatWindowService : Service() {
 
     private val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
     private var lastResult = ""
+
+    private val captureTask = object : Runnable {
+        override fun run() {
+            if (isRunning) {
+                captureAndOCR()
+                handler.postDelayed(this, CAPTURE_INTERVAL)
+            }
+        }
+    }
 
     companion object {
         const val CHANNEL_ID = "fanjian_float"
@@ -67,7 +75,7 @@ class FloatWindowService : Service() {
         val data = intent?.getParcelableExtra<Intent>("data")
 
         if (resultCode != -1 && data != null) {
-            startForeground(NOTIFICATION_ID, buildNotification("运行中..."))
+            startForeground(NOTIFICATION_ID, buildNotification("Running..."))
             projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             mediaProjection = projectionManager?.getMediaProjection(resultCode, data)
 
@@ -80,8 +88,8 @@ class FloatWindowService : Service() {
             startScreenCapture()
 
             isRunning = true
-            btnToggle.text = "⏸"
-            tvStatus.text = "自动识别中..."
+            btnToggle.text = "\u23F8"
+            tvStatus.text = "Auto detecting..."
         }
 
         return START_STICKY
@@ -95,8 +103,6 @@ class FloatWindowService : Service() {
         instance = null
         super.onDestroy()
     }
-
-    // ─── Float Window ────────────────────────────────
 
     private fun setupFloatWindow() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -113,7 +119,6 @@ class FloatWindowService : Service() {
         btnToggle.setOnClickListener { toggleCapture() }
         btnClose.setOnClickListener { stopSelf() }
 
-        // Make draggable
         makeDraggable(floatView.findViewById(R.id.title_bar))
 
         layoutParams = WindowManager.LayoutParams(
@@ -166,10 +171,8 @@ class FloatWindowService : Service() {
             if (::floatView.isInitialized) {
                 windowManager.removeView(floatView)
             }
-        } catch (e: Exception) { /* ignore */ }
+        } catch (e: Exception) { }
     }
-
-    // ─── Screen Capture ──────────────────────────────
 
     private fun startScreenCapture() {
         imageReader = ImageReader.newInstance(
@@ -185,17 +188,7 @@ class FloatWindowService : Service() {
             null, null
         )
 
-        scheduleNextCapture()
-    }
-
-    private fun scheduleNextCapture() {
-        captureRunnable = Runnable {
-            if (isRunning) {
-                captureAndOCR()
-                handler.postDelayed(captureRunnable, CAPTURE_INTERVAL)
-            }
-        }
-        handler.postDelayed(captureRunnable, 1000)
+        handler.postDelayed(captureTask, 1000)
     }
 
     private fun captureAndOCR() {
@@ -213,8 +206,6 @@ class FloatWindowService : Service() {
             val rowStride = plane.rowStride
             val rowPadding = rowStride - pixelStride * image.width
 
-            // Create bitmap (scale down for faster OCR)
-            val scale = 2
             val bmpWidth = image.width
             val bmpHeight = image.height
             val bitmap = Bitmap.createBitmap(
@@ -223,8 +214,8 @@ class FloatWindowService : Service() {
             )
             bitmap.copyPixelsFromBuffer(buffer)
 
-            // Crop to actual width, then scale down
             val cropped = Bitmap.createBitmap(bitmap, 0, 0, bmpWidth, bmpHeight)
+            val scale = 2
             val scaledW = bmpWidth / scale
             val scaledH = bmpHeight / scale
             val scaled = Bitmap.createScaledBitmap(cropped, scaledW, scaledH, true)
@@ -232,7 +223,6 @@ class FloatWindowService : Service() {
             bitmap.recycle()
             cropped.recycle()
 
-            // Run OCR
             val inputImage = InputImage.fromBitmap(scaled, 0)
             recognizer.process(inputImage)
                 .addOnSuccessListener { visionText ->
@@ -243,7 +233,7 @@ class FloatWindowService : Service() {
                             lastResult = allText
                             handler.post {
                                 tvResult.text = converted
-                                tvStatus.text = "已转换  字"
+                                tvStatus.text = "Converted ${converted.length} chars"
                                 scrollResult.fullScroll(View.FOCUS_UP)
                             }
                         }
@@ -254,7 +244,6 @@ class FloatWindowService : Service() {
                     scaled.recycle()
                 }
         } catch (e: Exception) {
-            // Skip frame on error
         } finally {
             image.close()
         }
@@ -262,7 +251,7 @@ class FloatWindowService : Service() {
 
     private fun stopCapture() {
         isRunning = false
-        captureRunnable?.let { handler.removeCallbacks(it) }
+        handler.removeCallbacks(captureTask)
         virtualDisplay?.release()
         imageReader?.close()
         mediaProjection?.stop()
@@ -271,26 +260,25 @@ class FloatWindowService : Service() {
     private fun toggleCapture() {
         if (isRunning) {
             isRunning = false
-            btnToggle.text = "▶"
-            tvStatus.text = "已暂停"
+            handler.removeCallbacks(captureTask)
+            btnToggle.text = "\u25B6"
+            tvStatus.text = "Paused"
         } else {
             isRunning = true
-            btnToggle.text = "⏸"
-            tvStatus.text = "自动识别中..."
-            scheduleNextCapture()
+            btnToggle.text = "\u23F8"
+            tvStatus.text = "Auto detecting..."
+            handler.postDelayed(captureTask, 500)
         }
     }
-
-    // ─── Notification ────────────────────────────────
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "繁转简悬浮窗",
+                "FanJianFloat",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "繁转简 OCR 后台服务"
+                description = "Traditional to Simplified OCR Service"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
@@ -299,7 +287,7 @@ class FloatWindowService : Service() {
 
     private fun buildNotification(text: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("繁转简")
+            .setContentTitle("FanJianFloat")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_edit)
             .setPriority(NotificationCompat.PRIORITY_LOW)
