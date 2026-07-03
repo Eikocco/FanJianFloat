@@ -31,7 +31,6 @@ class FloatWindowService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
-    private var projectionManager: MediaProjectionManager? = null
 
     private lateinit var tvStatus: TextView
     private lateinit var tvResult: TextView
@@ -68,28 +67,46 @@ class FloatWindowService : Service() {
         super.onCreate()
         instance = this
         createNotificationChannel()
+        Toast.makeText(this, "Service created", Toast.LENGTH_SHORT).show()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra("resultCode", -1) ?: -1
         val data = intent?.getParcelableExtra<Intent>("data")
 
+        android.util.Log.d("FanJianFloat", "onStartCommand: resultCode=$resultCode, data=${data != null}")
+
         if (resultCode != -1 && data != null) {
-            startForeground(NOTIFICATION_ID, buildNotification("Running..."))
-            projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = projectionManager?.getMediaProjection(resultCode, data)
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification("Running..."))
+            } catch (e: Exception) {
+                android.util.Log.e("FanJianFloat", "startForeground failed: ${e.message}")
+            }
 
-            val metrics = resources.displayMetrics
-            screenWidth = metrics.widthPixels
-            screenHeight = metrics.heightPixels
-            screenDensity = metrics.densityDpi
+            try {
+                val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                mediaProjection = manager.getMediaProjection(resultCode, data)
 
-            setupFloatWindow()
-            startScreenCapture()
+                val metrics = resources.displayMetrics
+                screenWidth = metrics.widthPixels
+                screenHeight = metrics.heightPixels
+                screenDensity = metrics.densityDpi
 
-            isRunning = true
-            btnToggle.text = "\u23F8"
-            tvStatus.text = "Auto detecting..."
+                setupFloatWindow()
+                startScreenCapture()
+
+                isRunning = true
+                btnToggle.text = "\u23F8"
+                tvStatus.text = "Auto detecting..."
+                Toast.makeText(this, "Float window ready!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                android.util.Log.e("FanJianFloat", "Setup failed: ${e.message}", e)
+                Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                stopSelf()
+            }
+        } else {
+            android.util.Log.w("FanJianFloat", "No valid intent extras, stopping")
+            stopSelf()
         }
 
         return START_STICKY
@@ -104,6 +121,7 @@ class FloatWindowService : Service() {
         super.onDestroy()
     }
 
+    @Suppress("DEPRECATION")
     private fun setupFloatWindow() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
@@ -121,15 +139,19 @@ class FloatWindowService : Service() {
 
         makeDraggable(floatView.findViewById(R.id.title_bar))
 
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
         layoutParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
+            type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -138,6 +160,7 @@ class FloatWindowService : Service() {
         }
 
         windowManager.addView(floatView, layoutParams)
+        android.util.Log.d("FanJianFloat", "Float window added to WindowManager")
     }
 
     private fun makeDraggable(dragView: View) {
@@ -149,16 +172,20 @@ class FloatWindowService : Service() {
         dragView.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    initialX = layoutParams!!.x
-                    initialY = layoutParams!!.y
+                    layoutParams?.let { lp ->
+                        initialX = lp.x
+                        initialY = lp.y
+                    }
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    layoutParams!!.x = initialX + (event.rawX - initialTouchX).toInt()
-                    layoutParams!!.y = initialY + (event.rawY - initialTouchY).toInt()
-                    windowManager.updateViewLayout(floatView, layoutParams)
+                    layoutParams?.let { lp ->
+                        lp.x = initialX + (event.rawX - initialTouchX).toInt()
+                        lp.y = initialY + (event.rawY - initialTouchY).toInt()
+                        windowManager.updateViewLayout(floatView, lp)
+                    }
                     true
                 }
                 else -> false
@@ -168,10 +195,12 @@ class FloatWindowService : Service() {
 
     private fun removeFloatWindow() {
         try {
-            if (::floatView.isInitialized) {
+            if (::floatView.isInitialized && ::windowManager.isInitialized) {
                 windowManager.removeView(floatView)
             }
-        } catch (e: Exception) { }
+        } catch (e: Exception) {
+            android.util.Log.e("FanJianFloat", "removeFloatWindow: ${e.message}")
+        }
     }
 
     private fun startScreenCapture() {
@@ -189,6 +218,7 @@ class FloatWindowService : Service() {
         )
 
         handler.postDelayed(captureTask, 1000)
+        android.util.Log.d("FanJianFloat", "Screen capture started")
     }
 
     private fun captureAndOCR() {
@@ -215,10 +245,7 @@ class FloatWindowService : Service() {
             bitmap.copyPixelsFromBuffer(buffer)
 
             val cropped = Bitmap.createBitmap(bitmap, 0, 0, bmpWidth, bmpHeight)
-            val scale = 2
-            val scaledW = bmpWidth / scale
-            val scaledH = bmpHeight / scale
-            val scaled = Bitmap.createScaledBitmap(cropped, scaledW, scaledH, true)
+            val scaled = Bitmap.createScaledBitmap(cropped, bmpWidth / 2, bmpHeight / 2, true)
 
             bitmap.recycle()
             cropped.recycle()
@@ -240,10 +267,12 @@ class FloatWindowService : Service() {
                     }
                     scaled.recycle()
                 }
-                .addOnFailureListener {
+                .addOnFailureListener { e ->
+                    android.util.Log.e("FanJianFloat", "OCR failed: ${e.message}")
                     scaled.recycle()
                 }
         } catch (e: Exception) {
+            android.util.Log.e("FanJianFloat", "captureAndOCR: ${e.message}")
         } finally {
             image.close()
         }
