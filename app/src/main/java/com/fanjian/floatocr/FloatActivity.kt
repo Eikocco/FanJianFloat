@@ -25,7 +25,6 @@ class FloatActivity : Activity() {
     private lateinit var tvStatus: TextView
     private lateinit var tvResult: TextView
     private lateinit var btnToggle: Button
-    private lateinit var scrollResult: ScrollView
 
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
@@ -35,6 +34,8 @@ class FloatActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
     private var lastResult = ""
+    private var screenW = 0
+    private var screenH = 0
 
     companion object {
         var resultCode: Int = -1
@@ -53,26 +54,36 @@ class FloatActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val metrics = resources.displayMetrics
+        screenW = metrics.widthPixels
+        screenH = metrics.heightPixels
+
+        // Position window in top-right area
+        val params = window.attributes
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = screenW - 700
+        params.y = 200
+        params.width = 340
+        params.height = WindowManager.LayoutParams.WRAP_CONTENT
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            params.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
             @Suppress("DEPRECATION")
-            window.setType(WindowManager.LayoutParams.TYPE_PHONE)
+            params.type = WindowManager.LayoutParams.TYPE_PHONE
         }
-
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-        )
-        window.setFormat(PixelFormat.TRANSLUCENT)
+        params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        params.format = PixelFormat.TRANSLUCENT
+        window.attributes = params
 
         setContentView(R.layout.float_window)
 
         tvStatus = findViewById(R.id.tv_status)
         tvResult = findViewById(R.id.tv_result)
         btnToggle = findViewById(R.id.btn_toggle)
-        scrollResult = findViewById(R.id.scroll_result)
+        val scrollResult: ScrollView = findViewById(R.id.scroll_result)
         val btnClose: Button = findViewById(R.id.btn_close)
 
         btnToggle.setOnClickListener { toggleCapture() }
@@ -84,34 +95,33 @@ class FloatActivity : Activity() {
         val pdata = projectionData
 
         if (rc != -1 && pdata != null) {
-            val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = manager.getMediaProjection(rc, pdata)
+            try {
+                val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                mediaProjection = manager.getMediaProjection(rc, pdata)
 
-            val metrics = resources.displayMetrics
-            val screenWidth = metrics.widthPixels
-            val screenHeight = metrics.heightPixels
-            val screenDensity = metrics.densityDpi
+                imageReader = ImageReader.newInstance(
+                    screenW / 2, screenH / 2,
+                    PixelFormat.RGBA_8888, 2
+                )
 
-            imageReader = ImageReader.newInstance(
-                screenWidth / 2, screenHeight / 2,
-                PixelFormat.RGBA_8888, 2
-            )
+                virtualDisplay = mediaProjection?.createVirtualDisplay(
+                    "FanJian",
+                    screenW, screenH, metrics.densityDpi,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader!!.surface, null, null
+                )
 
-            virtualDisplay = mediaProjection?.createVirtualDisplay(
-                "FanJianCapture",
-                screenWidth, screenHeight, screenDensity,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader!!.surface,
-                null, null
-            )
-
-            isRunning = true
-            btnToggle.text = "\u23F8"
-            tvStatus.text = "Auto detecting..."
-            handler.postDelayed(captureTask, 1000)
+                isRunning = true
+                btnToggle.text = "\u23F8"
+                tvStatus.text = "Auto detecting..."
+                handler.postDelayed(captureTask, 1000)
+            } catch (e: Exception) {
+                tvStatus.text = "Setup failed!"
+                Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            }
         } else {
-            tvStatus.text = "rc=$rc data=${pdata != null}"
-            Toast.makeText(this, "Error: no capture data rc=$rc", Toast.LENGTH_LONG).show()
+            tvStatus.text = "No capture permission"
+            Toast.makeText(this, "Please grant screen recording", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -131,10 +141,10 @@ class FloatActivity : Activity() {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val params = window.attributes
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
-                    window.attributes = params
+                    val p = window.attributes
+                    p.x = initialX + (event.rawX - initialTouchX).toInt()
+                    p.y = initialY + (event.rawY - initialTouchY).toInt()
+                    window.attributes = p
                     true
                 }
                 else -> false
@@ -152,15 +162,14 @@ class FloatActivity : Activity() {
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
             val rowPadding = rowStride - pixelStride * image.width
-
             val bmpWidth = image.width
             val bmpHeight = image.height
+
             val bitmap = android.graphics.Bitmap.createBitmap(
                 bmpWidth + rowPadding / pixelStride, bmpHeight,
                 android.graphics.Bitmap.Config.ARGB_8888
             )
             bitmap.copyPixelsFromBuffer(buffer)
-
             val cropped = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bmpWidth, bmpHeight)
             val scaled = android.graphics.Bitmap.createScaledBitmap(cropped, bmpWidth / 2, bmpHeight / 2, true)
             bitmap.recycle()
@@ -169,24 +178,28 @@ class FloatActivity : Activity() {
             val inputImage = InputImage.fromBitmap(scaled, 0)
             recognizer.process(inputImage)
                 .addOnSuccessListener { visionText ->
-                    val allText = visionText.text
-                    if (allText.isNotBlank() && allText != lastResult) {
-                        val converted = FanJianConverter.convert(allText)
-                        if (converted != allText) {
-                            lastResult = allText
-                            handler.post {
-                                tvResult.text = converted
-                                tvStatus.text = "Converted ${converted.length} chars"
-                                scrollResult.fullScroll(View.FOCUS_UP)
+                    try {
+                        val allText = visionText.text
+                        if (allText.isNotBlank() && allText != lastResult) {
+                            val converted = FanJianConverter.convert(allText)
+                            if (converted != allText) {
+                                lastResult = allText
+                                handler.post {
+                                    try {
+                                        tvResult.text = converted
+                                        tvStatus.text = "OK (${converted.length} chars)"
+                                    } catch (e: Exception) {}
+                                }
                             }
                         }
+                    } catch (e: Exception) {} finally {
+                        scaled.recycle()
                     }
-                    scaled.recycle()
                 }
                 .addOnFailureListener { scaled.recycle() }
         } catch (e: Exception) {
         } finally {
-            image.close()
+            try { image.close() } catch (e: Exception) {}
         }
     }
 
@@ -199,7 +212,7 @@ class FloatActivity : Activity() {
         } else {
             isRunning = true
             btnToggle.text = "\u23F8"
-            tvStatus.text = "Auto detecting..."
+            tvStatus.text = "Detecting..."
             handler.postDelayed(captureTask, 500)
         }
     }
@@ -207,9 +220,9 @@ class FloatActivity : Activity() {
     override fun onDestroy() {
         isRunning = false
         handler.removeCallbacks(captureTask)
-        virtualDisplay?.release()
-        imageReader?.close()
-        mediaProjection?.stop()
+        try { virtualDisplay?.release() } catch (e: Exception) {}
+        try { imageReader?.close() } catch (e: Exception) {}
+        try { mediaProjection?.stop() } catch (e: Exception) {}
         super.onDestroy()
     }
 }
