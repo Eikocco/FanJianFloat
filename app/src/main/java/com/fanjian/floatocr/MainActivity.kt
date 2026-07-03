@@ -71,22 +71,22 @@ class MainActivity : AppCompatActivity() {
         when (requestCode) {
             REQUEST_OVERLAY -> {
                 if (Settings.canDrawOverlays(this)) {
-                    Toast.makeText(this, "Overlay OK! Click again \uD83D\uDC46", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Overlay OK! Click again", Toast.LENGTH_SHORT).show()
                     tvHint.text = "Overlay granted!\nClick button to continue"
-                    btnStart.text = "\uD83D\uDE80 Continue"
+                    btnStart.text = "Continue"
                 }
             }
             REQUEST_PROJECTION -> {
                 if (resultCode == Activity.RESULT_OK && data != null) {
-                    // Start FloatActivity instead of Service
+                    // Store data in companion object (bypasses Intent extra issues)
+                    FloatActivity.resultCode = resultCode
+                    FloatActivity.projectionData = data
+
                     val intent = Intent(this, FloatActivity::class.java).apply {
-                        putExtra("resultCode", resultCode)
-                        putExtra("data", data)
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                     }
                     startActivity(intent)
-                    Toast.makeText(this, "Float window launched!", Toast.LENGTH_SHORT).show()
-                    finish() // close main activity
+                    finish()
                 } else {
                     Toast.makeText(this, "Screen recording permission needed!", Toast.LENGTH_LONG).show()
                 }

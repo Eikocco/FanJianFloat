@@ -36,6 +36,11 @@ class FloatActivity : Activity() {
     private val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
     private var lastResult = ""
 
+    companion object {
+        var resultCode: Int = -1
+        var projectionData: Intent? = null
+    }
+
     private val captureTask = object : Runnable {
         override fun run() {
             if (isRunning) {
@@ -48,7 +53,6 @@ class FloatActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Make this activity look like a floating window
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
         } else {
@@ -74,23 +78,20 @@ class FloatActivity : Activity() {
         btnToggle.setOnClickListener { toggleCapture() }
         btnClose.setOnClickListener { finish() }
 
-        // Make draggable via title bar
         makeDraggable(findViewById(R.id.title_bar))
 
-        // Get MediaProjection from the intent
-        val resultCode = intent.getIntExtra("resultCode", -1)
-        val data = intent.getParcelableExtra<Intent>("data")
+        val rc = resultCode
+        val pdata = projectionData
 
-        if (resultCode != -1 && data != null) {
+        if (rc != -1 && pdata != null) {
             val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = manager.getMediaProjection(resultCode, data)
+            mediaProjection = manager.getMediaProjection(rc, pdata)
 
             val metrics = resources.displayMetrics
             val screenWidth = metrics.widthPixels
             val screenHeight = metrics.heightPixels
             val screenDensity = metrics.densityDpi
 
-            // Start capture
             imageReader = ImageReader.newInstance(
                 screenWidth / 2, screenHeight / 2,
                 PixelFormat.RGBA_8888, 2
@@ -109,8 +110,8 @@ class FloatActivity : Activity() {
             tvStatus.text = "Auto detecting..."
             handler.postDelayed(captureTask, 1000)
         } else {
-            tvStatus.text = "No capture data!"
-            Toast.makeText(this, "Error: no screen capture data", Toast.LENGTH_LONG).show()
+            tvStatus.text = "rc=$rc data=${pdata != null}"
+            Toast.makeText(this, "Error: no capture data rc=$rc", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -143,11 +144,7 @@ class FloatActivity : Activity() {
 
     private fun captureAndOCR() {
         val reader = imageReader ?: return
-        val image = try {
-            reader.acquireLatestImage()
-        } catch (e: Exception) {
-            null
-        } ?: return
+        val image = try { reader.acquireLatestImage() } catch (e: Exception) { null } ?: return
 
         try {
             val plane = image.planes[0]
@@ -186,9 +183,7 @@ class FloatActivity : Activity() {
                     }
                     scaled.recycle()
                 }
-                .addOnFailureListener {
-                    scaled.recycle()
-                }
+                .addOnFailureListener { scaled.recycle() }
         } catch (e: Exception) {
         } finally {
             image.close()
