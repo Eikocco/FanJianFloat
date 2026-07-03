@@ -18,7 +18,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
     compileOptions {
@@ -28,6 +28,11 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+repositories {
+    google()
+    mavenCentral()
 }
 
 dependencies {
